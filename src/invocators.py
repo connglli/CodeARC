@@ -203,7 +203,8 @@ class ReasoningGuidedInvocator(BaseInvocator):
             prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_list)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left)).replace('[FUNCTION_NAME]', fnc_name)
         else:
             if self.max_debug_rounds == 0 and self.max_invocations - len(input_invocations) == 0:
-                prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '').replace('[MAX_INVOCATIONS]', '0').replace('[MAX_CHECKS]', '0').replace('[FUNCTION_NAME]', fnc_name)
+                if i > 0:
+                    prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '').replace('[MAX_INVOCATIONS]', '0').replace('[MAX_CHECKS]', '0').replace('[FUNCTION_NAME]', fnc_name)
                 prompt += "\n\n Despite what is previously discussed, in this current setting, you will not have information about 'OUTPUT_INVOCATIONS' or 'FAILED_INPUTS'. You must directly generate the Python implementation given the initial input-output pairs with no additional information."
             else:
                 raise RuntimeError("Invalid last action: this should never happen")
