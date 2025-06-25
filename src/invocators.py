@@ -113,15 +113,14 @@ class ReasoningGuidedInvocator(BaseInvocator):
         
 
         with tqdm(desc=f"Processing Problem prob_idx={prob_idx}, anonymous={self.anonymous}", colour="blue") as pbar:
+            if num_invocations_left == 0:
+                prompt = self.prompt_config['reasoning_guided']['base_no_invocations'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
+            elif num_debugs_left == 0:
+                prompt = self.prompt_config['reasoning_guided']['base_no_debugging'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
+            else:
+                prompt = self.prompt_config['reasoning_guided']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
             while num_debugs_left > 0 or num_invocations_left > 0:
-                if i == 0:
-                    if num_invocations_left == 0: 
-                        prompt = self.prompt_config['reasoning_guided']['base_no_invocations'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
-                    elif num_debugs_left == 0: 
-                        prompt = self.prompt_config['reasoning_guided']['base_no_debugging'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
-                    else: 
-                        prompt = self.prompt_config['reasoning_guided']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
-                else:
+                if i > 0:
                     if last_action == 'IMPLEMENTATION':
                         if num_invocations_left == 0: 
                             prompt = self.prompt_config['reasoning_guided']['iteration']['generated_draft_implementation_previous_iteration_no_invocations'].replace('[FAILED_INPUTS]', failed_inputs).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left)).replace('[FUNCTION_NAME]', fnc_name)
@@ -204,7 +203,8 @@ class ReasoningGuidedInvocator(BaseInvocator):
             prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_list)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left)).replace('[FUNCTION_NAME]', fnc_name)
         else:
             if self.max_debug_rounds == 0 and self.max_invocations - len(input_invocations) == 0:
-                prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '').replace('[MAX_INVOCATIONS]', '0').replace('[MAX_CHECKS]', '0').replace('[FUNCTION_NAME]', fnc_name)
+                if i > 0:
+                    prompt = self.prompt_config['reasoning_guided']['final']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '').replace('[MAX_INVOCATIONS]', '0').replace('[MAX_CHECKS]', '0').replace('[FUNCTION_NAME]', fnc_name)
                 prompt += "\n\n Despite what is previously discussed, in this current setting, you will not have information about 'OUTPUT_INVOCATIONS' or 'FAILED_INPUTS'. You must directly generate the Python implementation given the initial input-output pairs with no additional information."
             else:
                 raise RuntimeError("Invalid last action: this should never happen")
@@ -241,11 +241,10 @@ class SFTDistillation(ReasoningGuidedInvocator):
         
 
         with tqdm(desc=f"Processing Problem {prob_idx}", colour="blue") as pbar:
+            prompt = self.prompt_config['reasoning_guided']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
+            prompt = self.prompt_config['sft_distillation']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[FUNCTION_BODY]', gt_function) + '\n' + prompt
             while num_debugs_left > 0 or num_invocations_left > 0:
-                if i == 0:
-                    prompt = self.prompt_config['reasoning_guided']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[INPUT_INVOCATIONS]', '\n'.join(input_invocations)).replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_invocations)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left))
-                    prompt = self.prompt_config['sft_distillation']['base'].replace('[FUNCTION_NAME]', fnc_name).replace('[FUNCTION_BODY]', gt_function) + '\n' + prompt
-                else:
+                if i > 0:
                     prompt = self.prompt_config['reasoning_guided']['iteration']['generated_invocations_previous_iteration'].replace('[OUTPUT_INVOCATIONS]', '\n'.join(output_list)).replace('[MAX_INVOCATIONS]', str(num_invocations_left)).replace('[MAX_CHECKS]', str(num_debugs_left)).replace('[FUNCTION_NAME]', fnc_name)
                     prompt = self.prompt_config['sft_distillation']['iteration']['generated_invocations_previous_iteration'].replace('[FUNCTION_BODY]', gt_function) + '\n' + prompt
                 
