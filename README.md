@@ -1,6 +1,6 @@
-# CodeARC: Benchmarking Reasoning Capabilities of LLM Agents for Inductive Program Synthesis
+# CodeARC: Benchmarking Reasoning Capabilities of LLM Agents for Inductive Program Synthesis (COLM'25)
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+[![COLM 2025](https://img.shields.io/badge/Accepted-COLM%2725-blue)](https://colmweb.org/)
 [![arXiv](https://img.shields.io/badge/arXiv-2502.12466-b31b1b.svg)](https://arxiv.org/abs/2503.23145)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/downloads/)
@@ -10,6 +10,8 @@
 
 [![HuggingFace](https://img.shields.io/badge/🤗%20Hugging%20Face-%20Model%20Annotated-orange.svg)](https://huggingface.co/LLM4Code/CodeARC_annotated_llama3.1)
 [![HuggingFace](https://img.shields.io/badge/🤗%20Hugging%20Face-%20Model%20Anonymized-orange.svg)](https://huggingface.co/LLM4Code/CodeARC_anonymous_llama3.1)
+
+
 
 
 ## Quick Start
@@ -105,14 +107,15 @@ print(invocations_dataset["train"][0])
 
 ## Citation
 
-If you use this repository in your research, please cite the corresponding paper:
+If our research inspires you, please cite our paper:
 
 ```bibtex
-@article{wei2025codearc,
-  title={CodeARC: Benchmarking Reasoning Capabilities of LLM Agents for Inductive Program Synthesis},
-  author={Wei, Anjiang and Suresh, Tarun and Cao, Jiannan and Kannan, Naveen and Wu, Yuheng and Yan, Kai and Teixeira, Thiago SFX and Wang, Ke and Aiken, Alex},
-  journal={arXiv preprint arXiv:2503.23145},
-  year={2025}
+@inproceedings{wei2025codearc,
+  title={Code{ARC}: Benchmarking Reasoning Capabilities of {LLM} Agents for Inductive Program Synthesis},
+  author={Anjiang Wei and Tarun Suresh and Jiannan Cao and Naveen Kannan and Yuheng Wu and Kai Yan and Thiago S. F. X. Teixeira and Ke Wang and Alex Aiken},
+  booktitle={Second Conference on Language Modeling},
+  year={2025},
+  url={https://openreview.net/forum?id=Q5pVZCrrKr}
 }
 ```
 
