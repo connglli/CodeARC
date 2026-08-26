@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""
+Host-side oracle query evaluation script.
+Executes the ground-truth function on a single raw input safely with literal fallback.
+"""
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+
+import io
+import sys
+
+TARGET_FN_NAME = __TARGET_FN_NAME__
+RAW_INPUT = __RAW_INPUT__
+
+gt_globals = {}
+try:
+    exec(__GT_CODE__, gt_globals)
+except Exception as e:
+    print(f"<Exception: GT_LOAD_ERROR: {e}>")
+    sys.exit(0)
+
+q = RAW_INPUT.strip()
+try:
+    if q.startswith("print("):
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            exec(q, gt_globals)
+        finally:
+            sys.stdout = old_stdout
+        print(buf.getvalue().strip())
+    elif q.startswith(TARGET_FN_NAME + "(") or q.startswith("solution("):
+        res = eval(q, gt_globals)
+        print(repr(res))
+    else:
+        try:
+            res = eval(f"{TARGET_FN_NAME}({q})", gt_globals)
+        except NameError:
+            res = eval(f"{TARGET_FN_NAME}({q!r})", gt_globals)
+        print(repr(res))
+except Exception as exc:
+    print(f"<Exception: {type(exc).__name__}: {exc}>")

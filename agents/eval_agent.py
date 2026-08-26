@@ -39,9 +39,9 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 os.environ["PYTHONWARNINGS"] = "ignore::SyntaxWarning"
 
 try:
-  from oracle_server import CentralOracleServer, run_pynguin_verification
+  from oracle_server import CentralOracleServer, verify_solution
 except ImportError:
-  from agents.oracle_server import CentralOracleServer, run_pynguin_verification
+  from agents.oracle_server import CentralOracleServer, verify_solution
 
 # Paths resolved relative to this script
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -186,7 +186,9 @@ def make_ask_oracle_client_file(sample: dict[str, Any], server_port: int) -> str
   )
 
 
-def make_agent_prompt(sample: dict[str, Any]) -> str:
+def make_agent_prompt(
+  sample: dict[str, Any], max_queries: int = 20, max_checks: int = 2
+) -> str:
   """Generates agent prompt from template."""
   fn_name = sample["function_name"]
   invocations = sample["invocations"]
@@ -203,25 +205,11 @@ def make_agent_prompt(sample: dict[str, Any]) -> str:
   examples_text = "\n".join(examples_lines)
 
   template = (TEMPLATES_DIR / "prompt.txt.template").read_text(encoding="utf-8")
-  return template.replace("__FUNCTION_NAME__", fn_name).replace(
-    "__EXAMPLES_TEXT__", examples_text
-  )
-
-
-def make_diff_test_file(sample: dict[str, Any], sol_code: str) -> str:
-  """Generates diff_test_solution.py from template for live differential execution."""
-  fn_name = sample["function_name"]
-  gt_code = sample["gt_code"]
-  invocations = sample["invocations"]
-  template = (TEMPLATES_DIR / "diff_test_solution.py.template").read_text(
-    encoding="utf-8"
-  )
   return (
-    template.replace("__TASK_ID__", str(sample["id"]))
-    .replace("__TARGET_FN_NAME__", repr(fn_name))
-    .replace("__GT_CODE__", repr(gt_code))
-    .replace("__SOL_CODE__", repr(sol_code))
-    .replace("__INVOCATIONS__", repr(invocations))
+    template.replace("__FUNCTION_NAME__", fn_name)
+    .replace("__EXAMPLES_TEXT__", examples_text)
+    .replace("__MAX_QUERIES__", str(max_queries))
+    .replace("__MAX_CHECKS__", str(max_checks))
   )
 
 
@@ -406,13 +394,10 @@ def verify_functional_correctness(
   sample: dict[str, Any],
   timeout: float = 6.0,
   tmp_dir: Path | None = None,
-) -> tuple[bool, bool, str, str]:
+) -> tuple[bool, bool, str, dict[str, Any], dict[str, Any], str]:
   """
-  Independently evaluates solution.py in workspace.
-  Checks:
-  1. Side-by-side differential execution on PBE examples against live ground truth (diff_test_solution.py).
-  2. Pynguin differential test generation against ground truth using outdir/tmp.
-  Returns (is_correct: bool, pbe_passed: bool, pbe_score: str, status_or_error: str).
+  Independently evaluates solution.py in workspace using the single source of truth verification.
+  Returns (is_correct, pbe_passed, pbe_score, diff_test, pynguin, message).
   """
   sol_file = workspace / "solution.py"
   if not sol_file.exists():
@@ -420,58 +405,39 @@ def verify_functional_correctness(
       False,
       False,
       "0/0",
+      {
+        "passed": False,
+        "score": "0/0",
+        "passed_count": 0,
+        "total_count": 0,
+        "failed_input": None,
+        "expected_output": None,
+        "actual_output": None,
+      },
+      {
+        "passed": False,
+        "tests_generated": 0,
+        "result": "NO_SOLUTION_FILE",
+        "details": "solution.py was not created by agent",
+      },
       "solution.py was not created by agent",
     )
 
   sol_code = sol_file.read_text(encoding="utf-8")
-  gt_code = sample.get("gt_code", "")
-
-  # Stage 1: Run live differential testing on problem examples
-  pbe_passed = False
-  pbe_score = "0/0"
-  env = os.environ.copy()
-  env["PYTHONWARNINGS"] = "ignore::SyntaxWarning"
-
-  diff_test_script = make_diff_test_file(sample, sol_code)
-
-  try:
-    proc = subprocess.run(
-      [sys.executable, "-c", diff_test_script],
-      cwd=str(workspace),
-      capture_output=True,
-      text=True,
-      timeout=timeout,
-      env=env,
-      check=False,
-    )
-
-    out = proc.stdout
-    m = re.search(r"Summary:\s*(\d+)/(\d+)\s*examples passed", out)
-    if m:
-      pbe_score = f"{m.group(1)}/{m.group(2)}"
-      if m.group(1) == m.group(2) and int(m.group(2)) > 0:
-        pbe_passed = True
-    elif "__PBE_PASSED__=True" in out and proc.returncode == 0:
-      pbe_passed = True
-      pbe_score = "All"
-
-    if proc.returncode != 0 or not pbe_passed:
-      err_msg = proc.stdout.strip() or proc.stderr.strip()
-      return False, False, pbe_score, err_msg or "Differential PBE test mismatch"
-
-  except subprocess.TimeoutExpired:
-    return False, False, pbe_score, f"Differential verification timed out ({timeout}s)"
-  except (OSError, subprocess.SubprocessError, ValueError) as e:
-    return False, False, pbe_score, f"Differential verification error: {e}"
-
-  # Stage 2: Automated Pynguin differential test check if available
-  pynguin_result = run_pynguin_verification(
-    gt_code, sol_code, timeout=timeout, tmp_dir=tmp_dir
+  verif = verify_solution(
+    sample=sample,
+    sol_code=sol_code,
+    tmp_dir=tmp_dir,
+    timeout=timeout,
   )
-  if pynguin_result and pynguin_result != "PASS":
-    return False, pbe_passed, pbe_score, pynguin_result
-
-  return True, pbe_passed, pbe_score, "Passed"
+  return (
+    verif["is_correct"],
+    verif["pbe_passed"],
+    verif["pbe_score"],
+    verif["diff_test"],
+    verif["pynguin"],
+    verif["message"],
+  )
 
 
 def is_sample_completed(workspace: Path, agent: str = "opencode") -> bool:
@@ -506,17 +472,20 @@ def evaluate_task(
   agent: str,
   model: str,
   workspace: Path,
-  server_port: int,
+  server: CentralOracleServer,
   timeout: int,
   docker_image: str = "codearc-agent:latest",
   verbose: bool = False,
   opencode_config: str | None = None,
   no_docker: bool = False,
   tmp_dir: Path | None = None,
+  max_queries: int = 20,
+  max_checks: int = 2,
 ) -> dict[str, Any]:
   """Runs a single task with an agent (OpenCode or Claude) and evaluates result."""
   sample_id = sample["id"]
   sample_result_file = workspace / "result.json"
+  server_port = server.server_address[1]
 
   if is_sample_completed(workspace, agent=agent):
     try:
@@ -545,7 +514,7 @@ def evaluate_task(
   ask_oracle_content = make_ask_oracle_client_file(sample, server_port)
   (workspace / "ask_oracle.py").write_text(ask_oracle_content, encoding="utf-8")
 
-  prompt = make_agent_prompt(sample)
+  prompt = make_agent_prompt(sample, max_queries=max_queries, max_checks=max_checks)
 
   result = {
     "id": sample_id,
@@ -553,6 +522,29 @@ def evaluate_task(
     "correct": False,
     "pbe_passed": False,
     "pbe_score": "0/0",
+    "diff_test": {
+      "passed": False,
+      "score": "0/0",
+      "passed_count": 0,
+      "total_count": 0,
+      "failed_input": None,
+      "expected_output": None,
+      "actual_output": None,
+    },
+    "pynguin": {
+      "passed": False,
+      "tests_generated": 0,
+      "result": "NOT_RUN",
+      "details": None,
+    },
+    "oracle_usage": {
+      "queries_used": 0,
+      "queries_remaining": max_queries,
+      "max_queries": max_queries,
+      "checks_used": 0,
+      "checks_remaining": max_checks,
+      "max_checks": max_checks,
+    },
     "error": None,
     "elapsed": 0.0,
     "workspace": str(workspace),
@@ -571,16 +563,31 @@ def evaluate_task(
       no_docker=no_docker,
     )
 
-    correct, pbe_passed, pbe_score, msg = verify_functional_correctness(
-      workspace=workspace,
-      clean_test_content=test_content,
-      sample=sample,
-      tmp_dir=tmp_dir,
+    correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
+      verify_functional_correctness(
+        workspace=workspace,
+        clean_test_content=test_content,
+        sample=sample,
+        tmp_dir=tmp_dir,
+      )
     )
+
+    q_used = server.query_counts.get(sample_id, 0)
+    c_used = server.check_counts.get(sample_id, 0)
 
     result["correct"] = correct
     result["pbe_passed"] = pbe_passed
     result["pbe_score"] = pbe_score
+    result["diff_test"] = diff_test
+    result["pynguin"] = pynguin
+    result["oracle_usage"] = {
+      "queries_used": q_used,
+      "queries_remaining": max(0, max_queries - q_used),
+      "max_queries": max_queries,
+      "checks_used": c_used,
+      "checks_remaining": max(0, max_checks - c_used),
+      "max_checks": max_checks,
+    }
     result["error"] = None if correct else msg
 
   except (
@@ -603,8 +610,12 @@ def evaluate_task(
     if verbose:
       status = "✅ PASS" if result["correct"] else "❌ FAIL"
       pbe_stat = "✅" if result["pbe_passed"] else "❌"
+      pynguin_stat = "✅" if result["pynguin"]["passed"] else "❌"
       print(
-        f"[{sample_id}] {status} | PBE: {pbe_stat} ({result['pbe_score']}) | {result['elapsed']}s | err: {str(result['error'])[:50]}",
+        f"[{sample_id}] {status} | PBE: {pbe_stat} ({result['pbe_score']}) | "
+        f"Pynguin: {pynguin_stat} ({result['pynguin']['tests_generated']} tests) | "
+        f"Oracle: {result['oracle_usage']['queries_used']}q/{result['oracle_usage']['checks_used']}c | "
+        f"{result['elapsed']}s | err: {str(result['error'])[:40]}",
         flush=True,
       )
 
@@ -704,6 +715,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     help="Path to an opencode.jsonc config file to mount into the container (opencode agent only)",
   )
   parser.add_argument(
+    "--max-queries",
+    type=int,
+    default=30,
+    help="Maximum allowed test-time oracle queries per task (default: 20)",
+  )
+  parser.add_argument(
+    "--max-checks",
+    type=int,
+    default=2,
+    help="Maximum allowed test-time differential checks per task (default: 2)",
+  )
+  parser.add_argument(
     "--throttle",
     type=parse_throttle,
     default=None,
@@ -739,6 +762,9 @@ def print_startup_banner(
     f"   Docker Mode  : {'Disabled (Host)' if args.no_docker else args.docker_image}"
   )
   print(f"   Oracle Server: http://127.0.0.1:{server_port} (Single Master Daemon)")
+  print(
+    f"   Oracle Budget: {args.max_queries} queries | {args.max_checks} differential checks"
+  )
   if args.opencode_config:
     print(f"   OC Config    : {args.opencode_config}")
   print(f"   Tasks        : {total_tasks} samples")
@@ -777,7 +803,7 @@ def run_evaluation(
   args: argparse.Namespace,
   model: str,
   outdir: Path,
-  server_port: int,
+  server: CentralOracleServer,
 ) -> list[dict[str, Any]]:
   """Runs evaluation across all selected samples using ThreadPoolExecutor."""
   total_tasks = len(samples)
@@ -820,13 +846,15 @@ def run_evaluation(
         agent=args.agent,
         model=model,
         workspace=workspace,
-        server_port=server_port,
+        server=server,
         timeout=args.timeout,
         docker_image=args.docker_image,
         verbose=args.verbose,
         opencode_config=args.opencode_config,
         no_docker=args.no_docker,
         tmp_dir=outdir / "tmp",
+        max_queries=args.max_queries,
+        max_checks=args.max_checks,
       )
       future_to_sample[future] = sample
       return True
@@ -878,14 +906,21 @@ def print_and_save_summary(
   model: str,
   outdir: Path,
 ) -> None:
-  """Prints final metrics and writes lean summary JSON to outdir/result.json."""
+  """Prints final metrics and writes comprehensive summary JSON to outdir/result.json."""
   passed = sum(1 for r in results if r.get("correct"))
   pbe_passed = sum(1 for r in results if r.get("pbe_passed"))
+  pynguin_passed = sum(1 for r in results if r.get("pynguin", {}).get("passed", False))
   failed = total_tasks - passed
   final_pass_rate = (passed / total_tasks * 100) if total_tasks > 0 else 0.0
   final_pbe_rate = (pbe_passed / total_tasks * 100) if total_tasks > 0 else 0.0
+  final_pynguin_rate = (pynguin_passed / total_tasks * 100) if total_tasks > 0 else 0.0
   total_elapsed = sum(r.get("elapsed", 0.0) for r in results)
   avg_elapsed = round(total_elapsed / len(results), 2) if results else 0.0
+
+  total_queries = sum(r.get("oracle_usage", {}).get("queries_used", 0) for r in results)
+  avg_queries = round(total_queries / len(results), 2) if results else 0.0
+  total_checks = sum(r.get("oracle_usage", {}).get("checks_used", 0) for r in results)
+  avg_checks = round(total_checks / len(results), 2) if results else 0.0
 
   print("\n" + "=" * 70)
   print("📊 EVALUATION RESULTS - CodeARC Benchmark (Anonymous Dataset)")
@@ -894,7 +929,12 @@ def print_and_save_summary(
   print(f"   Total Tasks        : {total_tasks}")
   print(f"   🏆 Full Pass Rate  : {final_pass_rate:.2f}% ({passed}/{total_tasks})")
   print(f"   🧪 PBE Pass Rate   : {final_pbe_rate:.2f}% ({pbe_passed}/{total_tasks})")
+  print(
+    f"   🐧 Pynguin Pass    : {final_pynguin_rate:.2f}% ({pynguin_passed}/{total_tasks})"
+  )
   print(f"   ❌ Failed Tasks    : {failed}")
+  print(f"   🔮 Oracle Queries  : {total_queries} total ({avg_queries:.2f} avg/task)")
+  print(f"   🔍 Diff Checks     : {total_checks} total ({avg_checks:.2f} avg/task)")
   print(f"   ⏱️ Avg Elapsed      : {avg_elapsed:.2f}s")
   print("=" * 70)
 
@@ -907,9 +947,17 @@ def print_and_save_summary(
     "total_tasks": total_tasks,
     "passed": passed,
     "pbe_passed": pbe_passed,
+    "pynguin_passed": pynguin_passed,
     "failed": failed,
     "pass_rate": round(final_pass_rate, 2),
     "pbe_pass_rate": round(final_pbe_rate, 2),
+    "pynguin_pass_rate": round(final_pynguin_rate, 2),
+    "oracle_usage": {
+      "total_queries_used": total_queries,
+      "avg_queries_per_task": avg_queries,
+      "total_checks_used": total_checks,
+      "avg_checks_per_task": avg_checks,
+    },
     "avg_elapsed": avg_elapsed,
   }
 
@@ -951,7 +999,11 @@ def main():
 
   # Start Single Master Central Oracle Server with outdir/tmp
   server = CentralOracleServer(
-    ("127.0.0.1", 0), dataset, max_queries=20, max_checks=2, tmp_dir=tmp_dir
+    ("127.0.0.1", 0),
+    dataset,
+    max_queries=args.max_queries,
+    max_checks=args.max_checks,
+    tmp_dir=tmp_dir,
   )
   server_port = server.server_address[1]
   server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -959,7 +1011,7 @@ def main():
 
   try:
     print_startup_banner(args, model, total_tasks, outdir, server_port)
-    results = run_evaluation(samples, args, model, outdir, server_port)
+    results = run_evaluation(samples, args, model, outdir, server)
     print_and_save_summary(results, total_tasks, args, model, outdir)
   finally:
     server.shutdown()

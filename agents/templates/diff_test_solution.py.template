@@ -23,7 +23,7 @@ try:
                 f_gt = v
                 break
 except Exception as e:
-    print(f"GT_LOAD_ERROR: {e}")
+    print(f"GT_LOAD_ERROR\t{e}")
     sys.exit(2)
 
 # Load candidate function
@@ -37,10 +37,10 @@ try:
                 f_sol = v
                 break
     if not callable(f_sol):
-        print(f"SOL_NO_CALLABLE: No callable function found in solution.py (expected '{TARGET_FN_NAME}')")
+        print(f"SOL_NO_CALLABLE\tNo callable function found in solution.py (expected '{TARGET_FN_NAME}')")
         sys.exit(3)
 except Exception as e:
-    print(f"SOL_LOAD_ERROR: {e}")
+    print(f"SOL_LOAD_ERROR\t{e}")
     sys.exit(3)
 
 passed = 0
@@ -92,5 +92,5 @@ if passed == total and total > 0:
 else:
     if mismatches:
         first_inp, exp, got = mismatches[0]
-        print(f"DIFF_MISMATCH: invocation '{first_inp}' gt={exp!r} sol={got!r}")
+        print(f"DIFF_MISMATCH\t{first_inp}\t{exp}\t{got}")
     sys.exit(1)
