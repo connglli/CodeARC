@@ -443,7 +443,7 @@ def verify_functional_correctness(
 def is_sample_completed(workspace: Path, agent: str = "opencode") -> bool:
   """
   Checks if a task has completed successfully in a previous run.
-  Requires result.json and non-empty traj.jsonl.
+  Requires result.json and more than 1 line in traj.jsonl (single line indicates incomplete/aborted run).
   """
   result_file = workspace / "result.json"
   traj_file = workspace / "traj.jsonl"
@@ -452,16 +452,21 @@ def is_sample_completed(workspace: Path, agent: str = "opencode") -> bool:
   try:
     if traj_file.stat().st_size == 0:
       return False
+
+    with open(traj_file, "r", encoding="utf-8") as f:
+      lines = [line.strip() for line in f if line.strip()]
+
+    if len(lines) <= 1:
+      return False
+
     if agent == "opencode":
-      with open(traj_file, "r", encoding="utf-8") as f:
-        first_line = f.readline().strip()
-      if first_line:
-        try:
-          data = json.loads(first_line)
-          if isinstance(data, dict) and data.get("type") == "error":
-            return False
-        except json.JSONDecodeError:
+      first_line = lines[0]
+      try:
+        data = json.loads(first_line)
+        if isinstance(data, dict) and data.get("type") == "error":
           return False
+      except json.JSONDecodeError:
+        return False
     return True
   except OSError:
     return False
