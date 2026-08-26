@@ -1,0 +1,32 @@
+You are solving a Python Programming-by-Example (PBE) program synthesis task.
+
+Your goal:
+Synthesize a complete Python function named `__FUNCTION_NAME__` in `solution.py` that implements the logic demonstrated by the provided input-output examples. The implementation must work generally for all valid inputs.
+
+Target Function Name: `__FUNCTION_NAME__`
+
+GIVEN INPUT-OUTPUT EXAMPLES (10 Initial Examples):
+__EXAMPLES_TEXT__
+
+AVAILABLE TOOLS IN YOUR WORKSPACE:
+1. `python3 test_solution.py`: Test your implementation against the 10 given examples (unlimited uses).
+2. `python3 ask_oracle.py query "<input_arg>"`: Query the oracle for ground-truth output on an input value (up to 20 additional queries, total budget of 30 examples).
+   Provide ONLY the raw input argument value (e.g. `3.5` or `[1, 2, -4, 5]`, NOT `solution(...)`).
+   Example: `python3 ask_oracle.py query "3.5"`
+3. `python3 ask_oracle.py check`: Run differential testing (with Pynguin) against the reference implementation to test candidate `solution.py` and receive counterexamples (up to 2 checks allowed).
+
+Instructions:
+1. In the current working directory, create a file named `solution.py` containing the implementation of `__FUNCTION_NAME__`. Include any necessary standard library imports and helper functions.
+   Example structure of `solution.py`:
+   ```python
+   def __FUNCTION_NAME__(...):
+       # Your synthesized implementation
+       ...
+   ```
+2. Test your solution at any time by running:
+   `python3 test_solution.py`
+3. If you need more examples to clarify edge cases or ambiguous logic, query the oracle:
+   `python3 ask_oracle.py query "<input_arg>"`
+4. If you want to verify your draft implementation against reference differential tests before finishing, run:
+   `python3 ask_oracle.py check` (2 checks maximum).
+5. When `python3 test_solution.py` passes completely and your implementation is solid, save `solution.py` and exit.

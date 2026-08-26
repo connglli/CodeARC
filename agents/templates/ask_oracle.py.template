@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""
+Oracle client tool for CodeARC Task __PROBLEM_ID__.
+Allows querying outputs for test inputs and running differential testing against the reference implementation.
+Zero reference code is stored in this file.
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+SERVER_URL = "__SERVER_URL__"
+PROBLEM_ID = "__PROBLEM_ID__"
+
+def query_input(input_arg: str) -> None:
+    payload = json.dumps({"problem_id": PROBLEM_ID, "input": input_arg}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{SERVER_URL}/oracle",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("error"):
+                print(f"❌ {data['error']}")
+                sys.exit(1)
+            print(f"🔮 Oracle Output: {data['result']}")
+            print(f"   Queries remaining: {data['queries_remaining']}/{data['max_queries']} ({data['total_remaining']}/30 total examples remaining)")
+    except urllib.error.URLError as e:
+        print(f"❌ Error connecting to oracle service: {e}")
+        sys.exit(1)
+
+def check_solution() -> None:
+    if not os.path.exists("solution.py"):
+        print("❌ Error: solution.py not found in current directory.")
+        sys.exit(1)
+
+    with open("solution.py", "r", encoding="utf-8") as f:
+        code = f.read()
+
+    payload = json.dumps({"problem_id": PROBLEM_ID, "code": code}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{SERVER_URL}/check",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("error"):
+                print(f"❌ {data['error']}")
+                sys.exit(1)
+            if data.get("passed"):
+                print("🎉 Differential Test Passed! Your solution matches the reference implementation across all differential tests.")
+                print(f"   Differential checks remaining: {data['checks_remaining']}/{data['max_checks']}")
+                sys.exit(0)
+            else:
+                print("❌ Differential Test Failed! Counterexample found:")
+                print(f"   Failed Input: {data.get('failed_input')}")
+                print(f"   Expected    : {data.get('expected_output')}")
+                print(f"   Got Output  : {data.get('actual_output')}")
+                print(f"   Differential checks remaining: {data['checks_remaining']}/{data['max_checks']}")
+                sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"❌ Error connecting to differential testing service: {e}")
+        sys.exit(1)
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  python3 ask_oracle.py query '<input_arg>'   - Query oracle output for an input value (e.g. '3.5' or '[1, 2, 3]')")
+        print("  python3 ask_oracle.py check                - Run differential testing on solution.py (2 checks max)")
+        sys.exit(1)
+
+    cmd = sys.argv[1].lower()
+    if cmd == "query":
+        if len(sys.argv) < 3:
+            print("Error: Please provide the input argument to query.")
+            print("Example: python3 ask_oracle.py query '3.5'")
+            print("         python3 ask_oracle.py query '[1, 2, -4, 5]'")
+            sys.exit(1)
+        input_arg = " ".join(sys.argv[2:]).strip()
+        query_input(input_arg)
+    elif cmd == "check":
+        check_solution()
+    else:
+        print(f"Unknown command '{cmd}'. Available commands: 'query', 'check'")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

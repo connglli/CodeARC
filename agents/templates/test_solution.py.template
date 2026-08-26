@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+Test harness for CodeARC Task __TASK_ID__ (anonymous dataset).
+Tests solution.py against the provided input-output examples.
+"""
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+
+import ast
+import io
+import math
+import os
+import sys
+
+TARGET_FN_NAME = __TARGET_FN_NAME__
+TEST_CASES = __TEST_CASES__
+
+def values_match(actual_str: str, expected_str: str) -> bool:
+    """Robust value comparison handling floating-point tolerances, set/dict ordering, and types."""
+    actual_str = actual_str.strip()
+    expected_str = expected_str.strip()
+    if actual_str == expected_str:
+        return True
+    try:
+        actual_val = ast.literal_eval(actual_str)
+        expected_val = ast.literal_eval(expected_str)
+
+        def deep_compare(a, b):
+            if type(a) != type(b):
+                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                    return math.isclose(a, b, rel_tol=1e-5, abs_tol=1e-7)
+                return False
+            if isinstance(a, float):
+                return math.isclose(a, b, rel_tol=1e-5, abs_tol=1e-7)
+            if isinstance(a, (list, tuple)):
+                return len(a) == len(b) and all(deep_compare(x, y) for x, y in zip(a, b))
+            if isinstance(a, dict):
+                return a.keys() == b.keys() and all(deep_compare(a[k], b[k]) for k in a)
+            if isinstance(a, set):
+                return a == b
+            return a == b
+
+        return deep_compare(actual_val, expected_val)
+    except Exception:
+        return actual_str == expected_str
+
+def load_target_function():
+    if not os.path.exists("solution.py"):
+        print("❌ Error: solution.py not found in current directory.")
+        return None, None, "FileNotFoundError"
+
+    try:
+        import solution as mod
+    except Exception as e:
+        print(f"❌ Error importing solution.py: {e}")
+        return None, None, f"ImportError: {e}"
+
+    target_fn = None
+    if hasattr(mod, TARGET_FN_NAME):
+        target_fn = getattr(mod, TARGET_FN_NAME)
+    elif hasattr(mod, "solution"):
+        target_fn = getattr(mod, "solution")
+    elif hasattr(mod, "get_solution"):
+        target_fn = getattr(mod, "get_solution")
+    else:
+        callables = [v for k, v in vars(mod).items() if callable(v) and not k.startswith("__")]
+        if callables:
+            target_fn = callables[0]
+
+    if target_fn is None:
+        return None, None, f"No callable function found in module (expected '{TARGET_FN_NAME}')"
+
+    return target_fn, mod, None
+
+def run_all_tests():
+    fn, mod, err = load_target_function()
+    if fn is None:
+        print(f"FAILED: {err}")
+        sys.exit(1)
+
+    test_globals = dict(globals())
+    if mod is not None:
+        for k, v in vars(mod).items():
+            if not k.startswith("__"):
+                test_globals[k] = v
+    test_globals[TARGET_FN_NAME] = fn
+    test_globals["solution"] = fn
+    if hasattr(fn, "__name__"):
+        test_globals[fn.__name__] = fn
+
+    passed = 0
+    total = len(TEST_CASES)
+    print(f"🧪 Running {total} input-output test examples for function '{TARGET_FN_NAME}'...")
+
+    for i, (invocation_code, expected_output) in enumerate(TEST_CASES, 1):
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = buf
+            exec(invocation_code, test_globals)
+        except Exception as exc:
+            sys.stdout = old_stdout
+            print(f"  [Test {i:02d}/{total:02d}] 💥 EXCEPTION: {type(exc).__name__}: {exc}")
+            continue
+        finally:
+            sys.stdout = old_stdout
+
+        actual_output = buf.getvalue().strip()
+        expected_output_clean = expected_output.strip()
+
+        if values_match(actual_output, expected_output_clean):
+            passed += 1
+            print(f"  [Test {i:02d}/{total:02d}] ✅ PASS")
+        else:
+            print(f"  [Test {i:02d}/{total:02d}] ❌ FAIL")
+            print(f"      Expected: {expected_output_clean!r}")
+            print(f"      Actual  : {actual_output!r}")
+
+    print("=" * 60)
+    print(f"Summary: {passed}/{total} examples passed.")
+    if passed == total and total > 0:
+        print("__PBE_PASSED__=True")
+        print("🎉 All input-output examples passed!")
+        sys.exit(0)
+    else:
+        print(f"❌ Failed {total - passed} example(s).")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    run_all_tests()

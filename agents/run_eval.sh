@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# run_eval.sh - Build and run CodeARC agent benchmark in isolated Docker containers
+# ==============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Check if Docker is installed
+if ! command -v docker >/dev/null 2>&1; then
+  echo "❌ Error: Docker is not installed or not found in PATH." >&2
+  echo "Please install Docker to run agent evaluations in isolated containers," >&2
+  echo "or run eval_agent.py directly with --no-docker on host." >&2
+  exit 1
+fi
+
+IMAGE_NAME="${IMAGE_NAME:-codearc-agent:latest}"
+DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
+
+# Check for -h / --help or --rebuild flags
+REBUILD=0
+FORWARD_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+    python3 "${REPO_ROOT}/agents/eval_agent.py" --help
+    exit 0
+  elif [[ "$arg" == "--rebuild" ]]; then
+    REBUILD=1
+  else
+    FORWARD_ARGS+=("$arg")
+  fi
+done
+
+# If no arguments provided, display help
+if [[ ${#FORWARD_ARGS[@]} -eq 0 ]]; then
+  python3 "${REPO_ROOT}/agents/eval_agent.py" --help
+  exit 0
+fi
+
+# Build Docker image if not present or if --rebuild specified
+if [[ "$REBUILD" -eq 1 ]] || ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
+  echo "📦 Building Docker image '${IMAGE_NAME}' (Ubuntu 24.04 + OpenCode + Claude Code)..."
+  docker build \
+    -t "${IMAGE_NAME}" \
+    --build-arg UID="$(id -u)" \
+    --build-arg GID="$(id -g)" \
+    -f "${DOCKERFILE}" \
+    "${SCRIPT_DIR}"
+  echo "✅ Docker image built successfully."
+  echo ""
+fi
+
+# Detect relevant host environment variables (API keys and OpenCode settings)
+CANDIDATE_VARS=(
+  OPENROUTER_API_KEY
+  OPENROUTER_BASE_URL
+  OPENAI_API_KEY
+  OPENAI_BASE_URL
+  OPENAI_ORG_ID
+  ANTHROPIC_API_KEY
+  ANTHROPIC_BASE_URL
+  DEEPSEEK_API_KEY
+  DEEPSEEK_BASE_URL
+  GEMINI_API_KEY
+  GOOGLE_API_KEY
+  TOGETHER_API_KEY
+  OPENCODE_API_KEY
+  OPENCODE_MODEL
+  OPENCODE_BASE_URL
+)
+
+FOUND_VARS=()
+for var in "${CANDIDATE_VARS[@]}"; do
+  if [[ -n "${!var:-}" ]]; then
+    FOUND_VARS+=("${var}")
+  fi
+done
+
+UNSET_ENV_ARGS=()
+if [[ ${#FOUND_VARS[@]} -gt 0 ]]; then
+  echo "🔍 Detected the following environment variable(s) on host:"
+  for var in "${FOUND_VARS[@]}"; do
+    echo "   • ${var}"
+  done
+  echo ""
+
+  read -r -p "Do you want to pass these environment variable(s) to the container? [y/N]: " user_choice
+  if [[ "${user_choice,,}" =~ ^(y|yes)$ ]]; then
+    echo "🔑 Passing detected environment variables to eval_agent..."
+  else
+    echo "🔒 Host environment variables will NOT be passed to eval_agent."
+    for var in "${FOUND_VARS[@]}"; do
+      UNSET_ENV_ARGS+=("-u" "${var}")
+    done
+  fi
+else
+  echo "ℹ️  No provider environment variables detected on host."
+fi
+
+echo "🚀 Starting CodeARC evaluation with isolated Docker containers per task..."
+env "${UNSET_ENV_ARGS[@]}" python3 "${REPO_ROOT}/agents/eval_agent.py" \
+  "${FORWARD_ARGS[@]}" \
+  --docker-image "${IMAGE_NAME}"
