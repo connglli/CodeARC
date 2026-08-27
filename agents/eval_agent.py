@@ -486,6 +486,7 @@ def evaluate_task(
   max_queries: int = 20,
   max_checks: int = 2,
   reverify_failures: bool = False,
+  reverify_all: bool = False,
 ) -> dict[str, Any]:
   """Runs a single task with an agent (OpenCode or Claude) and evaluates result."""
   sample_id = sample["id"]
@@ -497,7 +498,10 @@ def evaluate_task(
       with open(sample_result_file, "r", encoding="utf-8") as f:
         cached_result = json.load(f)
 
-      if reverify_failures and not cached_result.get("correct"):
+      should_reverify = reverify_all or (
+        reverify_failures and not cached_result.get("correct")
+      )
+      if should_reverify:
         test_content = make_test_file(sample)
         correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
           verify_functional_correctness(
@@ -518,8 +522,12 @@ def evaluate_task(
         if verbose:
           status = "✅ PASS" if correct else "❌ FAIL"
           pbe_stat = "✅" if pbe_passed else "❌"
+          pynguin_stat = (
+            "✅" if cached_result.get("pynguin", {}).get("passed", False) else "❌"
+          )
+          pynguin_count = cached_result.get("pynguin", {}).get("tests_generated", 0)
           print(
-            f"[{sample_id}] 🔄 RE-VERIFIED {status} | PBE: {pbe_stat} ({pbe_score})",
+            f"[{sample_id}] 🔄 RE-VERIFIED {status} | PBE: {pbe_stat} ({pbe_score}) | Pynguin: {pynguin_stat} ({pynguin_count} tests)",
             flush=True,
           )
         return cached_result
@@ -789,6 +797,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     help="Re-verify already completed tasks that previously failed without re-running the agent",
   )
   parser.add_argument(
+    "--reverify-all",
+    action="store_true",
+    help="Re-verify all already completed tasks without re-running the agent",
+  )
+  parser.add_argument(
     "--throttle",
     type=parse_throttle,
     default=None,
@@ -827,8 +840,10 @@ def print_startup_banner(
   print(
     f"   Oracle Budget: {args.max_queries} queries | {args.max_checks} differential checks"
   )
-  if args.reverify_failures:
-    print("   Re-verify    : Enabled (re-verifying completed failed tasks)")
+  if args.reverify_all:
+    print("   Re-verify    : All completed tasks")
+  elif args.reverify_failures:
+    print("   Re-verify    : Completed failed tasks only")
   if args.opencode_config:
     print(f"   OC Config    : {args.opencode_config}")
   print(f"   Tasks        : {total_tasks} samples")
@@ -920,6 +935,7 @@ def run_evaluation(
         max_queries=args.max_queries,
         max_checks=args.max_checks,
         reverify_failures=args.reverify_failures,
+        reverify_all=args.reverify_all,
       )
       future_to_sample[future] = sample
       return True

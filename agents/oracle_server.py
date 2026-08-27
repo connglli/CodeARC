@@ -94,14 +94,22 @@ def run_pynguin_verification(
   All temporary artifacts are created in tmp_dir (defaults to outdir/tmp).
   Returns structured dictionary with test counts, result status, and failure details.
   """
-  pynguin_cmd = shutil.which("pynguin")
-  pytest_cmd = shutil.which("pytest")
+  venv_bin = Path(sys.executable).parent
+  pynguin_bin = venv_bin / "pynguin"
+  pytest_bin = venv_bin / "pytest"
+  pynguin_cmd = (
+    str(pynguin_bin) if pynguin_bin.exists() else (shutil.which("pynguin") or "")
+  )
+  pytest_cmd = (
+    str(pytest_bin) if pytest_bin.exists() else (shutil.which("pytest") or "")
+  )
+
   if not pynguin_cmd or not pytest_cmd:
     return {
       "passed": True,
       "tests_generated": 0,
       "result": "UNAVAILABLE",
-      "details": "pynguin or pytest not found in PATH",
+      "details": "pynguin or pytest not found in PATH or virtualenv",
     }
 
   base_tmp = (tmp_dir if tmp_dir is not None else Path("agents/output/tmp")).resolve()
@@ -116,7 +124,7 @@ def run_pynguin_verification(
     env["PYTHONWARNINGS"] = "ignore::SyntaxWarning"
 
     cmd = [
-      "pynguin",
+      pynguin_cmd,
       "--maximum-search-time",
       "5",
       "--project-path",
