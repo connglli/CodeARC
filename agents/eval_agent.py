@@ -390,7 +390,6 @@ def run_agent(
 
 def verify_functional_correctness(
   workspace: Path,
-  clean_test_content: str,
   sample: dict[str, Any],
   timeout: float = 6.0,
   tmp_dir: Path | None = None,
@@ -486,6 +485,7 @@ def evaluate_task(
   tmp_dir: Path | None = None,
   max_queries: int = 20,
   max_checks: int = 2,
+  reverify_failures: bool = False,
 ) -> dict[str, Any]:
   """Runs a single task with an agent (OpenCode or Claude) and evaluates result."""
   sample_id = sample["id"]
@@ -496,6 +496,34 @@ def evaluate_task(
     try:
       with open(sample_result_file, "r", encoding="utf-8") as f:
         cached_result = json.load(f)
+
+      if reverify_failures and not cached_result.get("correct"):
+        test_content = make_test_file(sample)
+        correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
+          verify_functional_correctness(
+            workspace=workspace,
+            sample=sample,
+            tmp_dir=tmp_dir,
+          )
+        )
+        cached_result["correct"] = correct
+        cached_result["pbe_passed"] = pbe_passed
+        cached_result["pbe_score"] = pbe_score
+        cached_result["diff_test"] = diff_test
+        cached_result["pynguin"] = pynguin
+        cached_result["error"] = None if correct else msg
+        with open(sample_result_file, "w", encoding="utf-8") as f:
+          json.dump(cached_result, f, indent=2)
+
+        if verbose:
+          status = "✅ PASS" if correct else "❌ FAIL"
+          pbe_stat = "✅" if pbe_passed else "❌"
+          print(
+            f"[{sample_id}] 🔄 RE-VERIFIED {status} | PBE: {pbe_stat} ({pbe_score})",
+            flush=True,
+          )
+        return cached_result
+
       if verbose:
         status = "✅ PASS" if cached_result.get("correct") else "❌ FAIL"
         pbe_info = cached_result.get("pbe_score", "")
@@ -588,7 +616,6 @@ def evaluate_task(
       correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
         verify_functional_correctness(
           workspace=workspace,
-          clean_test_content=test_content,
           sample=sample,
           tmp_dir=tmp_dir,
         )
@@ -747,7 +774,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
   parser.add_argument(
     "--max-queries",
     type=int,
-    default=30,
+    default=20,
     help="Maximum allowed test-time oracle queries per task (default: 20)",
   )
   parser.add_argument(
@@ -755,6 +782,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     type=int,
     default=2,
     help="Maximum allowed test-time differential checks per task (default: 2)",
+  )
+  parser.add_argument(
+    "--reverify-failures",
+    action="store_true",
+    help="Re-verify already completed tasks that previously failed without re-running the agent",
   )
   parser.add_argument(
     "--throttle",
@@ -795,6 +827,8 @@ def print_startup_banner(
   print(
     f"   Oracle Budget: {args.max_queries} queries | {args.max_checks} differential checks"
   )
+  if args.reverify_failures:
+    print("   Re-verify    : Enabled (re-verifying completed failed tasks)")
   if args.opencode_config:
     print(f"   OC Config    : {args.opencode_config}")
   print(f"   Tasks        : {total_tasks} samples")
@@ -885,6 +919,7 @@ def run_evaluation(
         tmp_dir=outdir / "tmp",
         max_queries=args.max_queries,
         max_checks=args.max_checks,
+        reverify_failures=args.reverify_failures,
       )
       future_to_sample[future] = sample
       return True
