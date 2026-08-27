@@ -556,31 +556,68 @@ def evaluate_task(
   }
 
   start_time = time.perf_counter()
+  agent_err = None
   try:
-    run_agent(
-      prompt=prompt,
-      workspace=workspace,
-      agent=agent,
-      model=model,
-      timeout=timeout,
-      docker_image=docker_image,
-      opencode_config=opencode_config,
-      no_docker=no_docker,
-    )
-
-    correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
-      verify_functional_correctness(
+    try:
+      run_agent(
+        prompt=prompt,
         workspace=workspace,
-        clean_test_content=test_content,
-        sample=sample,
-        tmp_dir=tmp_dir,
+        agent=agent,
+        model=model,
+        timeout=timeout + 10,
+        docker_image=docker_image,
+        opencode_config=opencode_config,
+        no_docker=no_docker,
       )
-    )
+    except (
+      OSError,
+      subprocess.SubprocessError,
+      TimeoutError,
+      RuntimeError,
+      ValueError,
+    ) as exc:
+      agent_err = str(exc)
+      err_path = workspace / "error.txt"
+      existing_err = err_path.read_text(encoding="utf-8") if err_path.exists() else ""
+      err_path.write_text(
+        f"{existing_err}\nException: {exc}\n".strip(), encoding="utf-8"
+      )
+
+    # Always verify workspace solution.py if created
+    try:
+      correct, pbe_passed, pbe_score, diff_test, pynguin, msg = (
+        verify_functional_correctness(
+          workspace=workspace,
+          clean_test_content=test_content,
+          sample=sample,
+          tmp_dir=tmp_dir,
+        )
+      )
+    except Exception as exc:  # noqa: BLE001
+      correct = False
+      pbe_passed = False
+      pbe_score = "0/0"
+      diff_test = {
+        "passed": False,
+        "score": "0/0",
+        "passed_count": 0,
+        "total_count": 0,
+        "failed_input": None,
+        "expected_output": None,
+        "actual_output": None,
+      }
+      pynguin = {
+        "passed": False,
+        "tests_generated": 0,
+        "result": "VERIFY_ERROR",
+        "details": str(exc),
+      }
+      msg = f"Verification error: {exc}"
 
     q_used = server.query_counts.get(sample_id, 0)
     c_used = server.check_counts.get(sample_id, 0)
 
-    result["correct"] = correct
+    result["correct"] = correct and (agent_err is None)
     result["pbe_passed"] = pbe_passed
     result["pbe_score"] = pbe_score
     result["diff_test"] = diff_test
@@ -593,19 +630,7 @@ def evaluate_task(
       "checks_remaining": max(0, max_checks - c_used),
       "max_checks": max_checks,
     }
-    result["error"] = None if correct else msg
-
-  except (
-    OSError,
-    subprocess.SubprocessError,
-    TimeoutError,
-    RuntimeError,
-    ValueError,
-  ) as exc:
-    result["error"] = str(exc)
-    err_path = workspace / "error.txt"
-    existing_err = err_path.read_text(encoding="utf-8") if err_path.exists() else ""
-    err_path.write_text(f"{existing_err}\nException: {exc}\n".strip(), encoding="utf-8")
+    result["error"] = None if (correct and not agent_err) else (agent_err or msg)
 
   finally:
     result["elapsed"] = round(time.perf_counter() - start_time, 2)

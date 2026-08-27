@@ -6,31 +6,68 @@ Executes ground-truth function and candidate solution.py side-by-side on problem
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
+import ast
 import io
+import math
 import sys
 
 TARGET_FN_NAME = __TARGET_FN_NAME__
 INVOCATIONS = __INVOCATIONS__
 
+def values_match(actual_str: str, expected_str: str) -> bool:
+    """Robust value comparison handling floating-point tolerances, set/dict ordering, and types."""
+    actual_str = actual_str.strip()
+    expected_str = expected_str.strip()
+    if actual_str == expected_str:
+        return True
+    try:
+        actual_val = ast.literal_eval(actual_str)
+        expected_val = ast.literal_eval(expected_str)
+
+        def deep_compare(a, b):
+            if type(a) != type(b):
+                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                    return math.isclose(a, b, rel_tol=1e-5, abs_tol=1e-7)
+                return False
+            if isinstance(a, float):
+                return math.isclose(a, b, rel_tol=1e-5, abs_tol=1e-7)
+            if isinstance(a, (list, tuple)):
+                return len(a) == len(b) and all(deep_compare(x, y) for x, y in zip(a, b))
+            if isinstance(a, dict):
+                return a.keys() == b.keys() and all(deep_compare(a[k], b[k]) for k in a)
+            if isinstance(a, set):
+                return a == b
+            return a == b
+
+        return deep_compare(actual_val, expected_val)
+    except Exception:
+        return actual_str == expected_str
+
 # Load ground-truth function
-gt_globals = {}
+gt_globals = dict(globals())
 try:
     exec(__GT_CODE__, gt_globals)
-    f_gt = gt_globals.get(TARGET_FN_NAME) or gt_globals.get("solution")
+    f_gt = gt_globals.get(TARGET_FN_NAME) or gt_globals.get("solution") or gt_globals.get("get_solution")
     if not callable(f_gt):
         for k, v in gt_globals.items():
             if callable(v) and not k.startswith("__"):
                 f_gt = v
                 break
+    if f_gt:
+        gt_globals[TARGET_FN_NAME] = f_gt
+        gt_globals["solution"] = f_gt
+        gt_globals["get_solution"] = f_gt
+        if hasattr(f_gt, "__name__"):
+            gt_globals[f_gt.__name__] = f_gt
 except Exception as e:
     print(f"GT_LOAD_ERROR\t{e}")
     sys.exit(2)
 
 # Load candidate function
-sol_globals = {}
+sol_globals = dict(globals())
 try:
     exec(__SOL_CODE__, sol_globals)
-    f_sol = sol_globals.get(TARGET_FN_NAME) or sol_globals.get("solution")
+    f_sol = sol_globals.get(TARGET_FN_NAME) or sol_globals.get("solution") or sol_globals.get("get_solution")
     if not callable(f_sol):
         for k, v in sol_globals.items():
             if callable(v) and not k.startswith("__"):
@@ -39,6 +76,11 @@ try:
     if not callable(f_sol):
         print(f"SOL_NO_CALLABLE\tNo callable function found in solution.py (expected '{TARGET_FN_NAME}')")
         sys.exit(3)
+    sol_globals[TARGET_FN_NAME] = f_sol
+    sol_globals["solution"] = f_sol
+    sol_globals["get_solution"] = f_sol
+    if hasattr(f_sol, "__name__"):
+        sol_globals[f_sol.__name__] = f_sol
 except Exception as e:
     print(f"SOL_LOAD_ERROR\t{e}")
     sys.exit(3)
@@ -79,7 +121,7 @@ for ex in INVOCATIONS:
     finally:
         sys.stdout = old_stdout
 
-    if out_gt == out_sol:
+    if values_match(out_sol, out_gt):
         passed += 1
     else:
         mismatches.append((inp, out_gt, out_sol))
